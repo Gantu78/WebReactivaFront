@@ -8,6 +8,8 @@ function App() {
     // Estados globales para pasar datos entre componentes
     const [listaDeMaterias, setListaDeMaterias] = useState([]);
     const [listaDeEstudiantes, setListaDeEstudiantes] = useState([]);
+    const [selectedMateriaId, setSelectedMateriaId] = useState(null);
+    const [selectedEstudianteId, setSelectedEstudianteId] = useState(null);
 
     return (
         <div className="container-fluid">
@@ -23,11 +25,27 @@ function App() {
         la lista global que usará el componente de Notas.
       */}
 
-            <GestorMaterias alSeleccionarMateria={setListaDeMaterias} />
+            <GestorMaterias
+                alSeleccionarMateria={setListaDeMaterias}
+                onCalificar={(materiaId, estudianteId) => {
+                    setSelectedMateriaId(materiaId);
+                    setSelectedEstudianteId(estudianteId);
+                }}
+            />
 
-            <GestorEstudiantes alSeleccionarEstudiante={setListaDeEstudiantes} />
+            <GestorEstudiantes 
+                alSeleccionarEstudiante={setListaDeEstudiantes}
+                onCalificar={(estudianteId) => {
+                    setSelectedEstudianteId(estudianteId);
+                }}
+            />
 
-            <GestorNotas listaMaterias={listaDeMaterias} listaEstudiantes={listaDeEstudiantes} />
+            <GestorNotas
+                listaMaterias={listaDeMaterias}
+                listaEstudiantes={listaDeEstudiantes}
+                selectedMateriaId={selectedMateriaId}
+                selectedEstudianteId={selectedEstudianteId}
+            />
 
         </div>
     );

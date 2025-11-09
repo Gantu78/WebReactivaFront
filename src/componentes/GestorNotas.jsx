@@ -1,6 +1,7 @@
 // src/componentes/GestorNotas.jsx
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import Alert from './Alert';
 
 // -----------------------------------------------------------------
 // ENDPOINTS DE BACKEND (Spring Boot) REQUERIDOS:
@@ -12,9 +13,9 @@ import axios from 'axios';
 // -----------------------------------------------------------------
 
 const URL_API_NOTAS = '/api/notas';
-const URL_API_PROMEDIO = '/api/promedio';
+const URL_API_PROMEDIO = '/api/notas/promedio';
 
-const GestorNotas = ({ listaMaterias, listaEstudiantes }) => {
+const GestorNotas = ({ listaMaterias, listaEstudiantes, selectedMateriaId, selectedEstudianteId }) => {
     // Estados para la selección
     const [idMateriaSel, setIdMateriaSel] = useState('');
     const [idEstudianteSel, setIdEstudianteSel] = useState('');
@@ -23,6 +24,7 @@ const GestorNotas = ({ listaMaterias, listaEstudiantes }) => {
     const [notas, setNotas] = useState([]);
     const [promedioFinal, setPromedioFinal] = useState(0.0);
     const [datosFormulario, setDatosFormulario] = useState({ id: null, observacion: '', valor: '', porcentaje: '' });
+    const [alert, setAlert] = useState({ type: '', message: '' });
 
     // Referencias a los nombres seleccionados para mostrar en el título
     const materiaSel = listaMaterias.find(m => m.id === parseInt(idMateriaSel));
@@ -46,6 +48,10 @@ const GestorNotas = ({ listaMaterias, listaEstudiantes }) => {
             console.error("Error al cargar notas o promedio:", error);
             setNotas([]);
             setPromedioFinal(0.0);
+            setAlert({
+                type: 'danger',
+                message: 'Error al cargar las notas: ' + (error.response?.data?.message || error.message)
+            });
         }
     };
 
@@ -58,6 +64,41 @@ const GestorNotas = ({ listaMaterias, listaEstudiantes }) => {
             obtenerNotasYPromedio();
         }
     }, [idMateriaSel, idEstudianteSel]);
+
+    // Si el padre indica una selección (por ejemplo al pulsar "Calificar"), la aplicamos
+    useEffect(() => {
+        if (selectedMateriaId) setIdMateriaSel(String(selectedMateriaId));
+    }, [selectedMateriaId]);
+
+    useEffect(() => {
+        if (selectedEstudianteId) setIdEstudianteSel(String(selectedEstudianteId));
+    }, [selectedEstudianteId]);
+
+    // Suscripción SSE para actualizaciones reactivas del promedio del estudiante
+    // Cuando el backend emite el id del estudiante, volvemos a solicitar el promedio
+    useEffect(() => {
+        if (!idEstudianteSel) return;
+
+        const sseUrl = `/api/notas/stream/promedio/${idEstudianteSel}`;
+        const es = new EventSource(sseUrl);
+
+        es.onmessage = () => {
+            // Solo refrescamos el promedio para la materia seleccionada
+            if (idMateriaSel && idEstudianteSel) {
+                axios.get(`${URL_API_PROMEDIO}/materia/${idMateriaSel}/estudiante/${idEstudianteSel}`)
+                    .then(res => setPromedioFinal(res.data))
+                    .catch(err => console.error('Error al actualizar promedio vía SSE:', err));
+            }
+        };
+
+        es.onerror = (err) => {
+            console.error('EventSource error:', err);
+            // Si hay error cerramos la conexión; se reabrirá cuando cambie la selección
+            es.close();
+        };
+
+        return () => es.close();
+    }, [idEstudianteSel, idMateriaSel]);
 
 
     const manejarCambio = (e) => {
@@ -81,17 +122,53 @@ const GestorNotas = ({ listaMaterias, listaEstudiantes }) => {
         };
 
         try {
-            // Crear (POST)
-            await axios.post(URL_API_NOTAS, nota);
+            if (datosFormulario.id) {
+                // Actualizar (PUT)
+                await axios.put(`${URL_API_NOTAS}/${datosFormulario.id}`, nota);
+            } else {
+                // Crear (POST)
+                await axios.post(URL_API_NOTAS, nota);
+            }
 
             reiniciarFormulario();
             // Recarga notas y promedio para reflejar el cambio (Simula la reactividad)
             obtenerNotasYPromedio();
+            setAlert({
+                type: 'success',
+                message: datosFormulario.id ? 'Nota actualizada correctamente' : 'Nota agregada correctamente'
+            });
+            setTimeout(() => setAlert({ type: '', message: '' }), 3000);
         } catch (error) {
-            console.error("Error al guardar nota:", error.response?.data?.message || error.message);
-            // Validaciones de 0-5 o suma > 100%
-            alert("Error: " + (error.response?.data?.message || "No se pudo guardar la nota. ¿Suma de porcentaje > 100%?"));
+            console.error("Error al guardar nota:", error);
+            const backendMsg = error.response?.data?.message || error.response?.data?.error || error.message;
+            let mensajeError = "Error: ";
+
+            if (backendMsg.includes("porcentajes excede el 100%")) {
+                mensajeError += "La suma de los porcentajes no puede exceder el 100%. Ajusta el porcentaje de la nota.";
+            } else if (error.response?.status === 500) {
+                mensajeError += "Error en el servidor. Por favor, verifica que los valores sean correctos:";
+                mensajeError += "\n- El valor debe estar entre 0 y 5";
+                mensajeError += "\n- El porcentaje debe estar entre 1 y 100";
+            } else if (backendMsg.includes("not found") || backendMsg.includes("no existe")) {
+                mensajeError += "No se encontró la nota a actualizar";
+            } else {
+                mensajeError += backendMsg || "Hubo un problema al guardar la nota. Verifica los valores ingresados";
+            }
+
+            setAlert({
+                type: 'danger',
+                message: mensajeError
+            });
         }
+    };
+
+    const manejarEditarNota = (nota) => {
+        setDatosFormulario({
+            id: nota.id,
+            observacion: nota.observacion || '',
+            valor: nota.valor != null ? String(nota.valor) : '',
+            porcentaje: nota.porcentaje != null ? String(nota.porcentaje) : ''
+        });
     };
 
     const manejarEliminar = async (id) => {
@@ -114,6 +191,13 @@ const GestorNotas = ({ listaMaterias, listaEstudiantes }) => {
                 <h3>Gestión de Notas (Sección 5.3)</h3>
             </div>
             <div className="card-body">
+
+                {/* Alertas */}
+                <Alert 
+                    type={alert.type} 
+                    message={alert.message} 
+                    onClose={() => setAlert({ type: '', message: '' })} 
+                />
 
                 {/* --- 1. SELECCIÓN DE CONTEXTO --- */}
                 <div className="row mb-3 p-3 border rounded">
@@ -143,7 +227,7 @@ const GestorNotas = ({ listaMaterias, listaEstudiantes }) => {
 
                         {/* Formulario Crear Nota (Mockup página 4) */}
                         <form onSubmit={manejarEnvio} className="mb-3 p-3 border rounded">
-                            <h5>Crear Nota</h5>
+                            <h5>{datosFormulario.id ? 'Editar Nota' : 'Crear Nota'}</h5>
                             <div className="row g-2 align-items-end">
                                 <div className="col-md-2">
                                     <label>Valor (0-5)</label>
@@ -158,7 +242,10 @@ const GestorNotas = ({ listaMaterias, listaEstudiantes }) => {
                                     <input type="text" name="observacion" value={datosFormulario.observacion} onChange={manejarCambio} placeholder="Ej: Parcial primer corte" className="form-control" />
                                 </div>
                                 <div className="col-md-3">
-                                    <button type="submit" className="btn btn-primary">Agregar Nota</button>
+                                    <button type="submit" className="btn btn-primary me-2">{datosFormulario.id ? 'Actualizar Nota' : 'Agregar Nota'}</button>
+                                    {datosFormulario.id && (
+                                        <button type="button" onClick={reiniciarFormulario} className="btn btn-secondary">Cancelar</button>
+                                    )}
                                 </div>
                             </div>
                         </form>
@@ -181,7 +268,7 @@ const GestorNotas = ({ listaMaterias, listaEstudiantes }) => {
                                     <td>{n.valor.toFixed(1)}</td>
                                     <td>{n.porcentaje}%</td>
                                     <td>
-                                        <button className="btn btn-sm btn-warning me-2" disabled>Editar</button>
+                                        <button className="btn btn-sm btn-warning me-2" onClick={() => manejarEditarNota(n)}>Editar</button>
                                         <button onClick={() => manejarEliminar(n.id)} className="btn btn-sm btn-danger">Eliminar</button>
                                     </td>
                                 </tr>

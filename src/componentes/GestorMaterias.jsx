@@ -13,9 +13,11 @@ import axios from 'axios';
 
 const URL_API = '/api/materias';
 
-const GestorMaterias = ({ alSeleccionarMateria }) => {
+const GestorMaterias = ({ alSeleccionarMateria, onCalificar }) => {
     // Estado para la lista de materias
     const [materias, setMaterias] = useState([]);
+    const [expandedMateriaId, setExpandedMateriaId] = useState(null);
+    const [estudiantesPorMateria, setEstudiantesPorMateria] = useState([]);
     // Estado para los datos del formulario (crear/editar)
     const [datosFormulario, setDatosFormulario] = useState({ id: null, nombre: '', creditos: '' });
 
@@ -83,6 +85,23 @@ const GestorMaterias = ({ alSeleccionarMateria }) => {
         }
     };
 
+    const manejarVerEstudiantes = async (materiaId) => {
+        if (expandedMateriaId === materiaId) {
+            setExpandedMateriaId(null);
+            setEstudiantesPorMateria([]);
+            return;
+        }
+
+        try {
+            const res = await axios.get(`/api/notas/materias/${materiaId}/estudiantes`);
+            setEstudiantesPorMateria(res.data || []);
+            setExpandedMateriaId(materiaId);
+        } catch (error) {
+            console.error('Error al obtener estudiantes por materia:', error);
+            alert('No se pudieron cargar los estudiantes para esta materia.');
+        }
+    };
+
     // Limpia el formulario
     const reiniciarFormulario = () => {
         setDatosFormulario({ id: null, nombre: '', creditos: '' });
@@ -143,12 +162,33 @@ const GestorMaterias = ({ alSeleccionarMateria }) => {
                             <td>
                                 <button onClick={() => manejarEditar(materia)} className="btn btn-sm btn-warning me-2">Editar</button>
                                 <button onClick={() => manejarEliminar(materia.id)} className="btn btn-sm btn-danger me-2">Eliminar</button>
-                                <button className="btn btn-sm btn-info" disabled>Ver Estudiantes</button>
+                                <button onClick={() => manejarVerEstudiantes(materia.id)} className="btn btn-sm btn-info me-2">Ver Estudiantes</button>
                             </td>
                         </tr>
                     ))}
                     </tbody>
                 </table>
+                {expandedMateriaId && (
+                    <div className="mt-3 p-3 border rounded">
+                        <h6>Estudiantes en la materia</h6>
+                        <table className="table">
+                            <thead>
+                                <tr><th>Nombre</th><th>Correo</th><th>Acciones</th></tr>
+                            </thead>
+                            <tbody>
+                                {estudiantesPorMateria.map(est => (
+                                    <tr key={est.id}>
+                                        <td>{est.nombre} {est.apellido}</td>
+                                        <td>{est.correo}</td>
+                                        <td>
+                                            <button className="btn btn-sm btn-primary me-2" onClick={() => onCalificar(expandedMateriaId, est.id)}>Calificar</button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
             </div>
         </div>
     );
